@@ -81,6 +81,20 @@ pipeline {
                 
             }
         }
+
+        stage('Anchore Image Scan') {
+            steps {
+                script {
+                   
+                    sh """
+                    
+                       sudo grype $DOCKER_IMAGE -o json > anchore-scan.json
+                       
+                    """
+                    archiveArtifacts artifacts: 'anchore-scan.json', allowEmptyArchive: true
+                }
+            }
+        }
         
         stage('Push Docker Image to ECR') {
             steps {
