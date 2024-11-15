@@ -1,0 +1,20 @@
+pipeline {
+    agent any
+    stages {
+
+        stage('Cleaning Workspace') {
+            steps {
+                
+                cleanWs()
+            }
+        }
+
+
+        stage('Clone Repository') {
+            steps {
+                checkout scm
+            }
+        }
+        
+    }
+}
