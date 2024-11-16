@@ -23,6 +23,48 @@ pipeline {
                 checkout scm
             }
         }
+
+        stage('Install Dependencies') {
+            steps {
+                
+                dir('web') {
+                   
+                    sh 'npm install' 
+                }
+                
+               
+               
+            }
+        }
+        
+        stage('npm unit test') {
+            steps {
+                
+                dir('web') {
+                   
+                    sh 'npm run test:unit' 
+                }
+                
+               
+               
+            }
+        }
+        
+        stage('npm intergration test') {
+            steps {
+                
+                dir('web') {
+                    
+                    catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                   
+                        sh 'npm run test:integ' 
+                    }    
+                }
+                
+               
+               
+            }
+        }
         
         
         stage('Static Code Analysis') {
