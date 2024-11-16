@@ -76,7 +76,7 @@ pipeline {
                               
                                      ${scannerHome}/bin/sonar-scanner \
                                      -Dsonar.projectName=dev-web-app \
-                                     -Dsonar.sources=api/ \
+                                     -Dsonar.sources=web/ \
                                      -Dsonar.projectKey=dev-web-app
                                      
                                 '''
