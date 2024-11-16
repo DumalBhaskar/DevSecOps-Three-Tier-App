@@ -1,0 +1,199 @@
+pipeline {
+    agent any
+    
+    environment {
+     
+     scannerHome = tool 'sonar-scanner'
+     DOCKER_IMAGE = "533267075370.dkr.ecr.ap-south-1.amazonaws.com/production/web-prod:${BUILD_NUMBER}"
+            
+    }
+
+    stages {
+
+        stage('Cleaning Workspace') {
+            steps {
+                
+                cleanWs()
+            }
+        }
+
+
+        stage('Clone Repository') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                
+                dir('web') {
+                   
+                    sh 'npm install' 
+                }
+                
+               
+               
+            }
+        }
+        
+        stage('npm unit test') {
+            steps {
+                
+                dir('web') {
+                   
+                    sh 'npm run test:unit' 
+                }
+                
+               
+               
+            }
+        }
+        
+        stage('npm intergration test') {
+            steps {
+                
+                dir('web') {
+                    
+                    catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                   
+                        sh 'npm run test:integ' 
+                    }    
+                }
+                
+               
+               
+            }
+        }
+        
+        
+        stage('Static Code Analysis') {
+            parallel {
+                stage('SonarQube Analysis') {
+                    steps {
+                        withSonarQubeEnv('sonar-server') {
+                              sh '''
+                              
+                                     ${scannerHome}/bin/sonar-scanner \
+                                     -Dsonar.projectName=prod-web-app \
+                                     -Dsonar.sources=web/ \
+                                     -Dsonar.projectKey=prod-web-app
+                                     
+                                '''
+                        }
+                    }
+                }
+
+                stage('Owasp Dependency Check') {
+                     steps {
+                        catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                            timeout(time: 60, unit: 'MINUTES') {
+                                dependencyCheck additionalArguments: '--scan web/', odcInstallation: 'dp'
+                                dependencyCheckPublisher pattern:'dependency-check-report.xml'
+                                
+                            }
+                        }
+                    }
+                }         
+        
+            }
+        }
+
+        stage("SonarQube Quality Gate") {
+            steps {
+                script {
+                    timeout(time: 1, unit: 'HOURS') {
+                        def qg = waitForQualityGate()
+                        if (qg.status != 'OK') {
+                            error "Pipeline aborted due to quality gate failure: ${qg.status}"
+                        }
+                    }
+                }
+            }
+        }
+
+
+        stage('docker') {
+            steps {
+                
+               dir('web') {
+                   
+                    sh 'sudo docker build  -t $DOCKER_IMAGE .' 
+                }
+                
+            }
+        }
+
+        stage('Anchore Image Scan') {
+            steps {
+                script {
+                   
+                    sh """
+                    
+                       sudo grype $DOCKER_IMAGE -o json > prod-web-anchore-scan.json
+                       
+                    """
+                    archiveArtifacts artifacts: 'prod-web-anchore-scan.json', allowEmptyArchive: true
+                }
+            }
+        }
+
+        stage('Push Docker Image to ECR') {
+            steps {
+                script {
+                    
+                    withCredentials([aws(accessKeyVariable: 'AWS_ACCESS_KEY_ID', credentialsId: 'aws-cred', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                        
+                            sh '''
+                                aws ecr get-login-password --region ap-south-1 | sudo docker login --username AWS --password-stdin 533267075370.dkr.ecr.ap-south-1.amazonaws.com
+                                sudo docker push $DOCKER_IMAGE 
+                            '''
+                    } 
+                }
+            }
+        }
+
+        stage('kubelinter') {
+            steps {
+                catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                    sh 'git clone https://gitlab.com/dumalbhaskar/application-helm-charts.git'
+                    
+                    sh 'kube-linter lint application-helm-charts/web/ --format json > prod-web-helm-kubelinter.json'
+                }    
+                
+                archiveArtifacts artifacts: 'prod-web-helm-kubelinter.json', allowEmptyArchive: true
+                
+            }
+        }
+        
+        
+        
+    }
+
+    post {
+            always {
+                
+
+                emailext(
+                    subject: "Jenkins Build: ${currentBuild.fullDisplayName} - ${currentBuild.result}",
+                    body: """<p>Build Status: ${currentBuild.result}</p>
+                            <p>Commit ID: ${env.GIT_COMMIT}</p>
+                            <p>Triggered By: ${currentBuild.getBuildCauses()[0]?.userId}</p>
+                            <p>Build Number: ${env.BUILD_NUMBER}</p>
+                            <p>Build URL: <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
+                            <p>Attached Reports:</p>
+                            <ul>
+                                <li>Kubelinter Report: prod-web-helm-kubelinter.json</li>
+                                <li>Anchore scan Report: prod-web-anchore-scan.json</li>
+                                <li>OWASP ZAP Report: dependency-check-report.xml</li>
+                            </ul>""",
+                    mimeType: 'text/html',        
+                    attachmentsPattern: "prod-web-anchore-scan.json, prod-web-helm-kubelinter.json, dependency-check-report.xml",
+                    to: 'dumalbhaskar@gmail.com'
+                )
+                
+                
+        
+            }
+    }
+}
