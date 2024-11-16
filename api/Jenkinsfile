@@ -33,9 +33,9 @@ pipeline {
                               sh '''
                               
                                      ${scannerHome}/bin/sonar-scanner \
-                                     -Dsonar.projectName=pythonapp \
+                                     -Dsonar.projectName=dev-api-app \
                                      -Dsonar.sources=api/ \
-                                     -Dsonar.projectKey=pythonapp
+                                     -Dsonar.projectKey=dev-api-app
                                      
                                 '''
                             }
@@ -88,14 +88,14 @@ pipeline {
                    
                     sh """
                     
-                       sudo grype $DOCKER_IMAGE -o json > anchore-scan.json
+                       sudo grype $DOCKER_IMAGE -o json > dev-anchore-scan.json
                        
                     """
-                    archiveArtifacts artifacts: 'anchore-scan.json', allowEmptyArchive: true
+                    archiveArtifacts artifacts: 'dev-anchore-scan.json', allowEmptyArchive: true
                 }
             }
         }
-        
+
         stage('Push Docker Image to ECR') {
             steps {
                 script {
@@ -110,6 +110,50 @@ pipeline {
                 }
             }
         }
+
+        stage('kubelinter') {
+            steps {
+                catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                    sh 'git clone https://gitlab.com/dumalbhaskar/application-helm-charts.git'
+                    // sh 'ls'
+                    // sh 'cd application-helm-charts'
+                    // sh 'ls'
+                    sh 'kube-linter lint application-helm-charts/api/ --format json > helm-kubelinter.json'
+                }    
+                
+                archiveArtifacts artifacts: 'helm-kubelinter.json', allowEmptyArchive: true
+                
+            }
+        }
         
+        
+        
+    }
+
+    post {
+            always {
+                
+
+                emailext(
+                    subject: "Jenkins Build: ${currentBuild.fullDisplayName} - ${currentBuild.result}",
+                    body: """<p>Build Status: ${currentBuild.result}</p>
+                            <p>Commit ID: ${env.GIT_COMMIT}</p>
+                            <p>Triggered By: ${currentBuild.getBuildCauses()[0]?.userId}</p>
+                            <p>Build Number: ${env.BUILD_NUMBER}</p>
+                            <p>Build URL: <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
+                            <p>Attached Reports:</p>
+                            <ul>
+                                <li>Kubelinter Report: helm-kubelinter.json</li>
+                                <li>Anchore scan Report: dev-anchore-scan.json</li>
+                                <li>OWASP ZAP Report: dependency-check-report.xml</li>
+                            </ul>""",
+                    mimeType: 'text/html',        
+                    attachmentsPattern: "dev-anchore-scan.json, helm-kubelinter.json, dependency-check-report.xml",
+                    to: 'dumalbhaskar@gmail.com'
+                )
+                
+                
+        
+            }
     }
 }
