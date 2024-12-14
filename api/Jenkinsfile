@@ -44,7 +44,7 @@ pipeline {
 
                 stage('Owasp Dependency Check') {
                      steps {
-                        catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                        catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
                             timeout(time: 60, unit: 'MINUTES') {
                                 dependencyCheck additionalArguments: '--scan ./', odcInstallation: 'dp'
                                 dependencyCheckPublisher pattern:'dependency-check-report.xml'
